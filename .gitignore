@@ -1,6 +1,11 @@
 ﻿
 _private/
 TEMP/_config_local/
+node_modules/*
+!node_modules/node_modules.asar
+npm-debug.log*
+dist/
+release/
 node_modules/OSC.js/
 node_modules/OSC-js/
 node_modules/nut.js/
