@@ -4,9 +4,14 @@ const path = require('path');
 const DEFAULT_SETTINGS = Object.freeze({
   lastVrmPath: '',
   cameraDeviceId: '',
+  cameraLabel: '',
   trackingMode: 'Face+Body',
+  backgroundMode: 'transparent',
   transparentBackground: true,
   obsMode: true,
+  alwaysOnTop: true,
+  avatarWindowBounds: { width: 1280, height: 720 },
+  controlWindowBounds: { width: 460, height: 760 },
   windowBounds: { width: 1280, height: 720 },
 });
 
@@ -18,9 +23,17 @@ function normalizeSettings(value = {}) {
   const merged = {
     ...DEFAULT_SETTINGS,
     ...value,
+    avatarWindowBounds: {
+      ...DEFAULT_SETTINGS.avatarWindowBounds,
+      ...(value.avatarWindowBounds || value.windowBounds || {}),
+    },
+    controlWindowBounds: {
+      ...DEFAULT_SETTINGS.controlWindowBounds,
+      ...(value.controlWindowBounds || {}),
+    },
     windowBounds: {
       ...DEFAULT_SETTINGS.windowBounds,
-      ...(value.windowBounds || {}),
+      ...(value.windowBounds || value.avatarWindowBounds || {}),
     },
   };
 
@@ -28,8 +41,13 @@ function normalizeSettings(value = {}) {
     merged.trackingMode = DEFAULT_SETTINGS.trackingMode;
   }
 
-  merged.transparentBackground = merged.transparentBackground !== false;
+  if (!['transparent', 'green', 'black'].includes(merged.backgroundMode)) {
+    merged.backgroundMode = DEFAULT_SETTINGS.backgroundMode;
+  }
+
+  merged.transparentBackground = merged.backgroundMode === 'transparent' && merged.transparentBackground !== false;
   merged.obsMode = merged.obsMode !== false;
+  merged.alwaysOnTop = merged.alwaysOnTop !== false;
 
   return merged;
 }

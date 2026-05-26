@@ -6,6 +6,9 @@ node_modules/*
 npm-debug.log*
 dist/
 release/
+ui-dist/
+playwright-report/
+test-results/
 node_modules/OSC.js/
 node_modules/OSC-js/
 node_modules/nut.js/
