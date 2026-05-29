@@ -82,6 +82,8 @@ test('background debug mode loads and exercises core controls without showing th
 
     await expect.poll(async () => (await app.windows()).length).toBe(1);
     await expect.poll(async () => browserWindow.evaluate((win) => win.isVisible())).toBe(false);
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMovable())).toBe(true);
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isAlwaysOnTop())).toBe(false);
     await expect.poll(async () => (await appState(appWindow)).legacyFrameSrc).toContain('../XR_Animator.html');
     await expect.poll(async () => (await appState(appWindow)).runtimeText, { timeout: 60000 }).toBe('Renderer ready');
     await expectNoErrors(appWindow, 'initial XR runtime boot');
@@ -136,11 +138,13 @@ test('background debug mode loads and exercises core controls without showing th
     await expectNoErrors(appWindow, 'center window');
 
     await clickCheckbox(appWindow, 'Always on top');
-    await expectNoErrors(appWindow, 'always on top off');
-    await expect.poll(async () => appWindow.evaluate(() => window.xrAnimatorElectron.getSettings().then((settings) => settings.alwaysOnTop))).toBe(false);
-    await clickCheckbox(appWindow, 'Always on top');
     await expectNoErrors(appWindow, 'always on top on');
     await expect.poll(async () => appWindow.evaluate(() => window.xrAnimatorElectron.getSettings().then((settings) => settings.alwaysOnTop))).toBe(true);
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isAlwaysOnTop())).toBe(true);
+    await clickCheckbox(appWindow, 'Always on top');
+    await expectNoErrors(appWindow, 'always on top off');
+    await expect.poll(async () => appWindow.evaluate(() => window.xrAnimatorElectron.getSettings().then((settings) => settings.alwaysOnTop))).toBe(false);
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isAlwaysOnTop())).toBe(false);
 
     await clickCheckbox(appWindow, 'Capture view only');
     await expectNoErrors(appWindow, 'capture view only on');

@@ -1,5 +1,20 @@
 # XR Animator React/Vite 리팩토링 계획
 
+## 현재 작업: macOS 일반 창 UI 복구
+
+- [x] Electron 창 설정에서 이동 불편 원인 확인
+- [x] 투명 창을 일반 macOS native frame/titlebar 창으로 변경
+- [x] Always on top 기본값을 끄고 기존 기본 설정을 마이그레이션
+- [x] 빌드와 테스트로 검증
+- [x] 새 앱 번들을 `/Applications`에 덮어쓰기 설치
+
+### 검토
+
+- 원인: Electron 창은 `frame: true`였지만 `transparent: true`와 투명 배경, Always on top 기본값 때문에 일반 macOS 앱 창처럼 보이지 않았다.
+- 조치: `titleBarStyle: 'default'`, 불투명 배경, 명시적 movable/minimize/maximize 설정을 적용했다.
+- 조치: Always on top 기본값을 껐고, 구버전 설정은 새 기본값으로 마이그레이션한다.
+- 검증: `npm run build:ui`, 주요 e2e 2개, `npm run package:mac`, `/Applications` 설치 및 codesign 검증을 통과했다.
+
 ## 목표
 
 XR Animator를 Electron 단일 창 기반 React/Vite 앱으로 전면 리팩토링한다. 기존 별도 Control 창은 제거하고, 기존 `js/`, `MMD.js/`, `three.js/`, `images/`, `css/` 레거시 자산은 유지한 채 React 쪽에 `legacy-runtime` 호환 레이어를 추가한다.

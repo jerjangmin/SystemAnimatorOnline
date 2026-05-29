@@ -9,7 +9,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   backgroundMode: 'transparent',
   transparentBackground: true,
   obsMode: true,
-  alwaysOnTop: true,
+  alwaysOnTop: false,
+  settingsVersion: 2,
   avatarWindowBounds: { width: 1280, height: 720 },
   windowBounds: { width: 1280, height: 720 },
 });
@@ -19,6 +20,7 @@ function settingsPath(app) {
 }
 
 function normalizeSettings(value = {}) {
+  const isLegacySettings = !value.settingsVersion;
   const merged = {
     ...DEFAULT_SETTINGS,
     ...value,
@@ -42,7 +44,8 @@ function normalizeSettings(value = {}) {
 
   merged.transparentBackground = merged.backgroundMode === 'transparent' && merged.transparentBackground !== false;
   merged.obsMode = merged.obsMode !== false;
-  merged.alwaysOnTop = merged.alwaysOnTop !== false;
+  merged.alwaysOnTop = isLegacySettings ? false : Boolean(merged.alwaysOnTop);
+  merged.settingsVersion = DEFAULT_SETTINGS.settingsVersion;
 
   return merged;
 }

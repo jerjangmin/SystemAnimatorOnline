@@ -29,7 +29,7 @@ const DEFAULT_SETTINGS = {
   cameraLabel: '',
   trackingMode: 'Face+Body',
   backgroundMode: 'transparent',
-  alwaysOnTop: true,
+  alwaysOnTop: false,
 };
 
 const DEFAULT_RUNTIME = {
@@ -440,7 +440,7 @@ function App() {
 
         <PanelSection title="Window">
           <label className="switch-row">
-            <input type="checkbox" checked={settings.alwaysOnTop !== false} onChange={setAlwaysOnTop} disabled={isBusy} />
+            <input type="checkbox" checked={Boolean(settings.alwaysOnTop)} onChange={setAlwaysOnTop} disabled={isBusy} />
             <span>Always on top</span>
           </label>
           <label className="switch-row">
