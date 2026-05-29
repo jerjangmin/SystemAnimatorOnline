@@ -8,6 +8,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function createHiddenBubbleMesh(win) {
+  const Vector3 = win.THREE?.Vector3 || win.MMD_SA?.THREEX?.THREE?.Vector3;
+  const position = Vector3 ? new Vector3() : { distanceToSquared: () => Number.POSITIVE_INFINITY };
+  const scale = Vector3 ? new Vector3(1, 1, 1) : { x: 1, y: 1, z: 1, multiplyScalar() { return this; } };
+  return {
+    visible: false,
+    position,
+    scale,
+  };
+}
+
 function getExpressionManagers(win) {
   const managers = [];
   const seen = new Set();
@@ -216,6 +227,9 @@ export function createLegacyRuntime({ frame, log, setSnapshot }) {
       try {
         const speechBubble = win.MMD_SA?.SpeechBubble;
         if (win.MMD_SA_options) win.MMD_SA_options.use_speech_bubble = false;
+        if (win.MMD_SA_options?.SpeechBubble_branch) {
+          win.MMD_SA_options.SpeechBubble_branch.use_cursor = false;
+        }
         if (speechBubble && !speechBubble.__xrAnimatorSuppressed) {
           speechBubble.__xrAnimatorSuppressed = true;
           speechBubble.message = () => {};
@@ -230,7 +244,9 @@ export function createLegacyRuntime({ frame, log, setSnapshot }) {
           bubble.hide = () => {};
           bubble.update_placement = () => {};
           bubble._update_placement = () => {};
-          if (!bubble._mesh) bubble._mesh = { visible: false };
+          bubble._branch_key_ = null;
+          bubble._drag_key_ = null;
+          if (!bubble._mesh) bubble._mesh = createHiddenBubbleMesh(win);
           else bubble._mesh.visible = false;
         });
         const meshObj = win.MMD_SA?.THREEX?.mesh_obj;
