@@ -11,6 +11,8 @@ const APP_ROOT = path.resolve(__dirname, '..');
 const APP_PRELOAD = path.join(__dirname, 'preload.js');
 const settingsStore = createSettingsStore(app);
 const isTestMode = process.env.SOMILAND_TEST_MODE === '1' || process.argv.includes('--test-mode');
+const isBackgroundDebug =
+  process.env.XR_ANIMATOR_BACKGROUND_DEBUG === '1' || process.argv.includes('--background-debug');
 
 let appWindow = null;
 
@@ -135,7 +137,9 @@ function createAppWindow() {
     if (!isAllowedNavigation(targetUrl)) event.preventDefault();
   });
 
-  appWindow.once('ready-to-show', () => appWindow.show());
+  appWindow.once('ready-to-show', () => {
+    if (!isBackgroundDebug) appWindow.show();
+  });
   appWindow.on('close', () => {
     if (!appWindow) return;
     const nextBounds = appWindow.getBounds();
@@ -155,6 +159,7 @@ function installIpc() {
   ipcMain.handle('xr-animator:env', () => ({
     appRoot: APP_ROOT,
     isTestMode,
+    isBackgroundDebug,
     legacyEntry: isTestMode ? '../tests/e2e/avatar-mock.html' : '../XR_Animator.html',
   }));
 

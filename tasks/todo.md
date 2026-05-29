@@ -69,6 +69,8 @@ XR Animator를 Electron 단일 창 기반 React/Vite 앱으로 전면 리팩토�
 - [x] `npm run build:ui`로 UI 빌드를 검증한다.
 - [x] `npm run test:e2e`로 Electron 단일 창과 핵심 명령 흐름을 검증한다.
 - [x] 실제 `npm run dev`로 창이 하나만 열리고, 3D 뷰포트와 디버그 패널이 표시되는지 확인한다.
+- [x] `--background-debug` 모드로 실제 창을 표시하지 않고 Electron을 실행한다.
+- [x] 백그라운드 상태에서 실제 `XR_Animator.html` 런타임을 로드하고 주요 버튼 조작 후 오류 로그를 검증한다.
 
 ## 검토 섹션
 
@@ -78,3 +80,5 @@ XR Animator를 Electron 단일 창 기반 React/Vite 앱으로 전면 리팩토�
 - 브라우저 호환성은 목표에서 제외했다.
 - 기본 립싱크는 기존 XR Animator의 얼굴/입 트래킹 흐름을 유지하는 방식으로 포함했다. 마이크 기반 별도 립싱크 제어 UI는 1차 범위에 추가하지 않았다.
 - 리뷰에서 나온 P1은 보완했다: 캡처 해상도 버튼은 실제 viewport 크기를 검증하고, 배경 적용은 viewport로 제한했으며, legacy click-through mutator는 shim 처리했고, Electron frame navigation/window-open allowlist를 추가했다.
+- 백그라운드 디버깅 검증을 추가했다: 실제 앱 창은 표시하지 않고 hidden `BrowserWindow`에서 실제 XR 런타임을 로드한 뒤 배경, 표정, 트래킹, 카메라 리셋, 창 중앙 정렬, 캡처 해상도 조작을 자동 실행한다.
+- React 셸에 CSP meta를 추가해 Electron의 Insecure Content-Security-Policy 경고를 제거했다. 레거시 iframe은 `eval` 의존이 있어 1차에서는 별도 CSP를 강제하지 않는다.
