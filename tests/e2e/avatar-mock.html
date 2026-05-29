@@ -1,0 +1,56 @@
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Somiland VTuber Avatar Mock</title>
+  <style>
+    body { margin: 0; background: transparent; }
+    #LBG_dummy { position: fixed; inset: 0; display: none; }
+  </style>
+</head>
+<body class="sv-bg-transparent">
+  <div id="LBG_dummy"></div>
+  <script>
+    const expressionValues = {};
+    const expressionManager = {
+      expressionMap: { happy: {}, relaxed: {}, sad: {}, angry: {}, surprised: {} },
+      setValue(name, value) { expressionValues[name] = value; },
+      update() {},
+    };
+
+    window.__somilandMock = {
+      loadedVrm: '',
+      trackingMode: '',
+      expressionValues,
+    };
+
+    window.SA_DragDropEMU = async (filePath) => {
+      window.__somilandMock.loadedVrm = filePath;
+      return true;
+    };
+    window.System = {
+      _browser: {
+        camera: {
+          streamer_mode: {
+            init_mocap(mode) {
+              window.__somilandMock.trackingMode = mode;
+            },
+          },
+        },
+      },
+    };
+    window.MMD_SA = {
+      MMD_started: true,
+      THREEX: {
+        scene: {
+          userData: { vrm: { expressionManager } },
+          traverse(callback) { callback(this); },
+        },
+      },
+    };
+    window.MMD_SA_options = {
+      user_camera: { streamer_mode: { camera_preference: {} } },
+      mesh_obj_by_id: {},
+    };
+  </script>
+</body>
+</html>

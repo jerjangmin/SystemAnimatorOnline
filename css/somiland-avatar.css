@@ -1,0 +1,42 @@
+html,
+body {
+  background: transparent;
+  overflow: hidden;
+}
+
+body.sv-bg-green {
+  background: #00b140;
+}
+
+body.sv-bg-black {
+  background: #000000;
+}
+
+body.sv-bg-transparent {
+  background: transparent;
+}
+
+/* Hide legacy System Animator chrome. The engine stays alive; only the old UI surface is removed. */
+#Lquick_menu,
+#LbuttonTL,
+#LbuttonLR,
+#Lnumpad,
+#SB_tooltip,
+.QuickMenu_button,
+.Tooltip_LR::after,
+.Tooltip_TR::after,
+.MC_button_s::after {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+#Ldebug {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+#LBG_dummy {
+  position: fixed !important;
+  inset: 0 !important;
+}

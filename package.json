@@ -1,14 +1,57 @@
 {
-  "name": "System Animator (NW.js)"
- ,"main": "SystemAnimator_webkit.html"
- ,"single-instance": false
- ,"chromium-args" : "--enable-webaudio-input --ignore-gpu-blacklist"
- ,"node-remote" : "<local>"
- ,"window": {
-    "frame": false
-   ,"toolbar": false
-   ,"resizable": false
-   ,"icon": "icon_teto_512x512.png"
-   ,"transparent": true
+  "name": "somiland-vtuber",
+  "version": "0.1.0",
+  "description": "Personal macOS VTuber app based on XR Animator/System Animator Online.",
+  "author": "Somiland",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "build:ui": "vite build --config ui/vite.config.js",
+    "app": "npm run build:ui && electron .",
+    "dev": "npm run build:ui && electron . --dev",
+    "package:mac": "npm run build:ui && electron-builder --mac --dir",
+    "dist:mac": "npm run build:ui && electron-builder --mac",
+    "test:e2e": "npm run build:ui && playwright test -c tests/e2e/playwright.config.js"
+  },
+  "dependencies": {
+    "@electron/remote": "^2.1.3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^42.2.0",
+    "electron-builder": "^26.0.12",
+    "playwright": "^1.60.0",
+    "vite": "^8.0.14"
+  },
+  "build": {
+    "appId": "com.somiland.vtuber",
+    "productName": "Somiland VTuber",
+    "asar": false,
+    "files": [
+      "**/*",
+      "!dist{,/**}",
+      "!_private{,/**}",
+      "!TEMP/_config_local{,/**}",
+      "!ui{,/**}",
+      "!tests{,/**}",
+      "!playwright-report{,/**}",
+      "!test-results{,/**}",
+      "!.git{,/**}"
+    ],
+    "mac": {
+      "target": [
+        "dir"
+      ],
+      "category": "public.app-category.video",
+      "icon": "icon_SA_512x512.png",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSCameraUsageDescription": "Somiland VTuber uses your camera for avatar motion tracking.",
+        "NSMicrophoneUsageDescription": "Somiland VTuber may use your microphone for lip sync or audio-reactive avatar features."
+      }
+    }
   }
 }
