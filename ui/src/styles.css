@@ -306,6 +306,26 @@ h1 {
   line-height: 1.45;
 }
 
+.error-summary {
+  display: grid;
+  gap: 3px;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid #fecdca;
+  border-radius: 7px;
+  background: #fff1f0;
+  color: var(--danger);
+}
+
+.error-summary strong,
+.error-summary span {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .log-panel {
   grid-column: 1 / -1;
   display: grid;
@@ -341,23 +361,79 @@ h1 {
   padding: 8px 12px;
 }
 
-.log-list p {
+.log-list p,
+.log-entry {
   margin: 0 0 4px;
-  overflow: hidden;
+}
+
+.log-entry {
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: #d1d5db;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.log-entry--error {
+  border-color: rgb(248 113 113 / 0.45);
+  background: rgb(127 29 29 / 0.35);
+}
+
+.log-entry--warn {
+  border-color: rgb(251 191 36 / 0.4);
+  background: rgb(120 53 15 / 0.28);
+}
+
+.log-entry summary {
+  display: grid;
+  grid-template-columns: 84px 56px 120px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.log-entry summary strong,
+.log-entry summary span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.log-list time {
+.log-list time,
+.log-entry dt {
   color: #93c5fd;
 }
 
 .log-list code {
   color: #99f6e4;
+}
+
+.log-entry dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0 8px 8px 154px;
+}
+
+.log-entry dl div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.log-entry dt,
+.log-entry dd {
+  margin: 0;
+}
+
+.log-entry pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .xr-shell--capture {

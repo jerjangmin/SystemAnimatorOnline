@@ -56,6 +56,16 @@ export function createLegacyRuntime({ frame, log, setSnapshot }) {
   const getWindow = () => frame.current?.contentWindow || null;
   const getDocument = () => frame.current?.contentDocument || null;
 
+  function logError(source, error, detail = {}) {
+    log('error', error instanceof Error ? error : new Error(String(error)), {
+      source,
+      detail: {
+        ...detail,
+        runtime: snapshot(),
+      },
+    });
+  }
+
   function snapshot(patch = {}) {
     const win = getWindow();
     const next = {
@@ -150,15 +160,79 @@ export function createLegacyRuntime({ frame, log, setSnapshot }) {
     log('legacy-ui', '레거시 UI 숨김 패치를 적용했습니다.');
   }
 
+  function installDiagnostics() {
+    const win = getWindow();
+    if (!win || win.__xrAnimatorDiagnosticsInstalled) return;
+    win.__xrAnimatorDiagnosticsInstalled = true;
+
+    win.addEventListener('error', (event) => {
+      logError('legacy-window-error', event.error || event.message, {
+        message: event.message,
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+      });
+    });
+
+    win.addEventListener('unhandledrejection', (event) => {
+      logError('legacy-unhandled-rejection', event.reason || 'Unhandled promise rejection', {
+        reason: event.reason?.message || String(event.reason),
+      });
+    });
+
+    ['error', 'warn'].forEach((level) => {
+      const original = win.console?.[level];
+      if (typeof original !== 'function') return;
+      win.console[level] = (...args) => {
+        original.apply(win.console, args);
+        const message = args.map((arg) => {
+          if (arg instanceof Error) return `${arg.name}: ${arg.message}`;
+          if (typeof arg === 'object') {
+            try {
+              return JSON.stringify(arg);
+            } catch {
+              return String(arg);
+            }
+          }
+          return String(arg);
+        }).join(' ');
+        log(level === 'error' ? 'error' : 'legacy-warn', message, {
+          level: level === 'error' ? 'error' : 'warn',
+          source: `legacy-console.${level}`,
+          detail: { args: args.map((arg) => (arg instanceof Error ? { name: arg.name, message: arg.message, stack: arg.stack } : String(arg))) },
+          stack: args.find((arg) => arg instanceof Error)?.stack || '',
+        });
+      };
+    });
+
+    log('diagnostics', '레거시 iframe 오류/경고 수집기를 설치했습니다.');
+  }
+
   function suppressSpeechBubbles() {
     const win = getWindow();
     if (!win) return;
 
     const hide = () => {
       try {
+        const speechBubble = win.MMD_SA?.SpeechBubble;
         if (win.MMD_SA_options) win.MMD_SA_options.use_speech_bubble = false;
-        win.MMD_SA?.SpeechBubble?.hide?.();
-        (win.MMD_SA?.SpeechBubble?.list || []).forEach((bubble) => bubble?.hide?.());
+        if (speechBubble && !speechBubble.__xrAnimatorSuppressed) {
+          speechBubble.__xrAnimatorSuppressed = true;
+          speechBubble.message = () => {};
+          speechBubble.show = () => {};
+          speechBubble.hide = () => {};
+        }
+        (speechBubble?.list || []).forEach((bubble) => {
+          if (!bubble) return;
+          bubble.visible = false;
+          bubble.message = () => {};
+          bubble.show = () => {};
+          bubble.hide = () => {};
+          bubble.update_placement = () => {};
+          bubble._update_placement = () => {};
+          if (!bubble._mesh) bubble._mesh = { visible: false };
+          else bubble._mesh.visible = false;
+        });
         const meshObj = win.MMD_SA?.THREEX?.mesh_obj;
         ['SpeechBubbleMESH0', 'SpeechBubbleMESH1', 'SpeechBubbleMESH2', 'SpeechBubbleMESH3'].forEach((id) => {
           meshObj?.get?.(id)?.hide?.();
@@ -228,6 +302,7 @@ export function createLegacyRuntime({ frame, log, setSnapshot }) {
   }
 
   async function onFrameLoad() {
+    installDiagnostics();
     patchLegacyUi();
     suppressSpeechBubbles();
     autoStartLegacy();
@@ -240,7 +315,7 @@ export function createLegacyRuntime({ frame, log, setSnapshot }) {
       log('runtime', 'XR Animator 렌더러가 준비되었습니다.');
     } catch (error) {
       snapshot({ level: 'error', message: error.message });
-      log('error', error.message);
+      logError('legacy-runtime', error);
     }
   }
 

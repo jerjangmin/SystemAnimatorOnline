@@ -45,6 +45,8 @@ const DEFAULT_RUNTIME = {
   expressionPreset: 'neutral',
 };
 
+const LOG_LIMIT = 160;
+
 function bridge() {
   return window.xrAnimatorElectron;
 }
@@ -69,6 +71,36 @@ function PanelSection({ title, children }) {
   );
 }
 
+function serializeError(error) {
+  if (!error) return {};
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack || '',
+      cause: error.cause ? serializeError(error.cause) : undefined,
+    };
+  }
+  if (typeof error === 'object') {
+    try {
+      return JSON.parse(JSON.stringify(error));
+    } catch {
+      return { message: String(error) };
+    }
+  }
+  return { message: String(error) };
+}
+
+function formatDetail(detail) {
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  try {
+    return JSON.stringify(detail, null, 2);
+  } catch {
+    return String(detail);
+  }
+}
+
 function App() {
   const frameRef = useRef(null);
   const runtimeRef = useRef(null);
@@ -87,13 +119,55 @@ function App() {
     () => runtime.currentModel || basename(settings.lastVrmPath) || 'None',
     [runtime.currentModel, settings.lastVrmPath]
   );
+  const errorLogs = useMemo(() => logs.filter((entry) => entry.level === 'error'), [logs]);
 
-  function addLog(scope, message) {
-    const text = message instanceof Error ? message.message : String(message);
+  function addLog(scope, message, options = {}) {
+    const errorDetail = message instanceof Error ? serializeError(message) : null;
+    const text = errorDetail?.message || String(message);
+    const level = options.level || (scope === 'error' || message instanceof Error ? 'error' : 'info');
     setLogs((prev) => [
-      { id: `${Date.now()}-${Math.random()}`, time: new Date().toLocaleTimeString(), scope, message: text },
-      ...prev,
-    ].slice(0, 80));
+      (() => {
+        const fingerprint = [
+          level,
+          scope,
+          options.source || 'react-shell',
+          text,
+          options.stack || errorDetail?.stack || '',
+        ].join('|');
+        if (prev[0]?.fingerprint === fingerprint) {
+          return {
+            ...prev[0],
+            at: new Date().toISOString(),
+            time: new Date().toLocaleTimeString(),
+            count: (prev[0].count || 1) + 1,
+            detail: options.detail || errorDetail || prev[0].detail,
+          };
+        }
+        return {
+          id: `${Date.now()}-${Math.random()}`,
+          at: new Date().toISOString(),
+          time: new Date().toLocaleTimeString(),
+          count: 1,
+          fingerprint,
+          level,
+          scope,
+          source: options.source || 'react-shell',
+          message: text,
+          detail: options.detail || errorDetail || null,
+          stack: options.stack || errorDetail?.stack || '',
+          runtime: options.runtime || null,
+        };
+      })(),
+      ...(
+        prev[0]?.fingerprint === [
+          level,
+          scope,
+          options.source || 'react-shell',
+          text,
+          options.stack || errorDetail?.stack || '',
+        ].join('|') ? prev.slice(1) : prev
+      ),
+    ].slice(0, LOG_LIMIT));
   }
 
   function updateRuntime(patch) {
@@ -124,13 +198,13 @@ function App() {
       })
       .catch((nextError) => {
         setError(nextError.message);
-        addLog('error', nextError);
+        addLog('error', nextError, { source: 'bootstrap' });
       });
 
     cleanupDrop = bridge().onLegacyDrop?.((filePath) => {
       runtimeRef.current?.loadVrm(filePath).catch((nextError) => {
         setError(nextError.message);
-        addLog('error', nextError);
+        addLog('error', nextError, { source: 'legacy-drop', runtime });
       });
     }) || cleanupDrop;
 
@@ -154,7 +228,7 @@ function App() {
       return result;
     } catch (nextError) {
       setError(nextError.message);
-      addLog('error', nextError);
+      addLog('error', nextError, { source: key, runtime });
       return null;
     } finally {
       setBusy('');
@@ -284,6 +358,12 @@ function App() {
           <p className="eyebrow">Debug Console</p>
           <h2>{statusText(runtime)}</h2>
           {error ? <p className="error-text" role="alert">{error}</p> : null}
+          {errorLogs.length ? (
+            <div className="error-summary" role="status">
+              <strong>{errorLogs.length} error log(s)</strong>
+              <span>{errorLogs[0].message}</span>
+            </div>
+          ) : null}
         </header>
 
         <PanelSection title="Runtime">
@@ -364,11 +444,25 @@ function App() {
       <section className="log-panel" aria-label="runtime log">
         <div className="log-status">
           <strong>{busy ? `Running: ${busy}` : 'Idle'}</strong>
-          <span>{logs.length} log entries</span>
+          <span>{logs.length} entries / {errorLogs.length} errors</span>
         </div>
         <div className="log-list">
           {logs.length ? logs.map((entry) => (
-            <p key={entry.id}><time>{entry.time}</time> <code>{entry.scope}</code> {entry.message}</p>
+            <details key={entry.id} className={`log-entry log-entry--${entry.level}`} open={entry.level === 'error'}>
+              <summary>
+                <time>{entry.time}</time>
+                <code>{entry.level}</code>
+                <span>{entry.scope}</span>
+                <strong>{entry.count > 1 ? `${entry.message} (x${entry.count})` : entry.message}</strong>
+              </summary>
+              <dl>
+                <div><dt>source</dt><dd>{entry.source}</dd></div>
+                <div><dt>timestamp</dt><dd>{entry.at}</dd></div>
+                {entry.detail ? <div><dt>detail</dt><dd><pre>{formatDetail(entry.detail)}</pre></dd></div> : null}
+                {entry.stack ? <div><dt>stack</dt><dd><pre>{entry.stack}</pre></dd></div> : null}
+                {entry.runtime ? <div><dt>runtime</dt><dd><pre>{formatDetail(entry.runtime)}</pre></dd></div> : null}
+              </dl>
+            </details>
           )) : <p>No logs yet.</p>}
         </div>
       </section>
