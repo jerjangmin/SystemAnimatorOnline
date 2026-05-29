@@ -71,6 +71,7 @@ XR Animator를 Electron 단일 창 기반 React/Vite 앱으로 전면 리팩토�
 - [x] 실제 `npm run dev`로 창이 하나만 열리고, 3D 뷰포트와 디버그 패널이 표시되는지 확인한다.
 - [x] `--background-debug` 모드로 실제 창을 표시하지 않고 Electron을 실행한다.
 - [x] 백그라운드 상태에서 실제 `XR_Animator.html` 런타임을 로드하고 주요 버튼 조작 후 오류 로그를 검증한다.
+- [x] 백그라운드 상태에서 모든 주요 UI 컨트롤을 직접 조작한다: VRM 선택 취소, Load Last disabled 상태, 카메라 새로고침/선택, 배경, 표정, 트래킹, Always on top, Capture view only, 캡처 해상도, Center, Reset Camera.
 
 ## 검토 섹션
 
@@ -82,3 +83,6 @@ XR Animator를 Electron 단일 창 기반 React/Vite 앱으로 전면 리팩토�
 - 리뷰에서 나온 P1은 보완했다: 캡처 해상도 버튼은 실제 viewport 크기를 검증하고, 배경 적용은 viewport로 제한했으며, legacy click-through mutator는 shim 처리했고, Electron frame navigation/window-open allowlist를 추가했다.
 - 백그라운드 디버깅 검증을 추가했다: 실제 앱 창은 표시하지 않고 hidden `BrowserWindow`에서 실제 XR 런타임을 로드한 뒤 배경, 표정, 트래킹, 카메라 리셋, 창 중앙 정렬, 캡처 해상도 조작을 자동 실행한다.
 - React 셸에 CSP meta를 추가해 Electron의 Insecure Content-Security-Policy 경고를 제거했다. 레거시 iframe은 `eval` 의존이 있어 1차에서는 별도 CSP를 강제하지 않는다.
+- 직접 조작 중 `Capture view only`에서 빠져나올 수 없는 문제가 발견되어 Escape로 캡처 모드를 종료하는 복구 경로를 추가했다.
+- 직접 조작 중 레거시 iframe이 host window size를 되돌리는 문제가 발견되어 remote shim과 캡처 크기 안정화 재적용을 추가했다.
+- 현재 macOS workArea에서 `Capture 1920x1080`은 1920 폭은 적용되지만 1080 높이는 제한될 수 있다. 이 경우 React 로그에 실제 적용된 capture size warning을 남긴다.

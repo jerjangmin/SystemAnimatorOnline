@@ -46,6 +46,17 @@ async function clickButton(page, name) {
   await expect.poll(async () => (await page.locator('.log-status strong').textContent()) || '').toBe('Idle');
 }
 
+async function clickCheckbox(page, name) {
+  const target = page.locator('label.switch-row').filter({ hasText: name });
+  await page.locator('.debug-panel').evaluate((panel, text) => {
+    const label = Array.from(panel.querySelectorAll('label.switch-row'))
+      .find((node) => node.textContent.includes(text));
+    label?.scrollIntoView({ block: 'center' });
+  }, name);
+  await target.click({ force: true });
+  await expect.poll(async () => (await page.locator('.log-status strong').textContent()) || '').toBe('Idle');
+}
+
 async function expectNoErrors(page, step) {
   const state = await appState(page);
   expect(state.errorEntries, `${step}: ${JSON.stringify(state, null, 2)}`).toEqual([]);
@@ -59,6 +70,9 @@ test('background debug mode loads and exercises core controls without showing th
   try {
     const appWindow = await app.firstWindow();
     const browserWindow = await app.browserWindow(appWindow);
+    await app.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+    });
     appWindow.on('pageerror', (error) => browserErrors.push(error.stack || error.message));
     appWindow.on('console', (message) => {
       if (['error', 'warning'].includes(message.type())) {
@@ -71,6 +85,33 @@ test('background debug mode loads and exercises core controls without showing th
     await expect.poll(async () => (await appState(appWindow)).legacyFrameSrc).toContain('../XR_Animator.html');
     await expect.poll(async () => (await appState(appWindow)).runtimeText, { timeout: 60000 }).toBe('Renderer ready');
     await expectNoErrors(appWindow, 'initial XR runtime boot');
+
+    await appWindow.evaluate(() => {
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          async getUserMedia() {
+            return { getTracks: () => [{ stop() {} }] };
+          },
+          async enumerateDevices() {
+            return [
+              { kind: 'videoinput', deviceId: 'camera-a', label: 'Background Camera A' },
+              { kind: 'audioinput', deviceId: 'mic-a', label: 'Ignored Microphone' },
+            ];
+          },
+        },
+      });
+    });
+
+    await clickButton(appWindow, 'Load VRM');
+    await expectNoErrors(appWindow, 'load VRM canceled dialog');
+    await expect(appWindow.getByRole('button', { name: 'Load Last' })).toBeDisabled();
+
+    await clickButton(appWindow, 'Refresh Cameras');
+    await expectNoErrors(appWindow, 'refresh cameras');
+    await appWindow.locator('select.select').selectOption('camera-a');
+    await expect.poll(async () => (await appWindow.locator('.log-status strong').textContent()) || '').toBe('Idle');
+    await expectNoErrors(appWindow, 'select camera');
 
     for (const name of ['Black', 'Green', 'Transparent']) {
       await clickButton(appWindow, name);
@@ -94,6 +135,20 @@ test('background debug mode loads and exercises core controls without showing th
     await clickButton(appWindow, 'Center');
     await expectNoErrors(appWindow, 'center window');
 
+    await clickCheckbox(appWindow, 'Always on top');
+    await expectNoErrors(appWindow, 'always on top off');
+    await expect.poll(async () => appWindow.evaluate(() => window.xrAnimatorElectron.getSettings().then((settings) => settings.alwaysOnTop))).toBe(false);
+    await clickCheckbox(appWindow, 'Always on top');
+    await expectNoErrors(appWindow, 'always on top on');
+    await expect.poll(async () => appWindow.evaluate(() => window.xrAnimatorElectron.getSettings().then((settings) => settings.alwaysOnTop))).toBe(true);
+
+    await clickCheckbox(appWindow, 'Capture view only');
+    await expectNoErrors(appWindow, 'capture view only on');
+    await expect.poll(async () => appWindow.evaluate(() => document.querySelector('.xr-shell')?.classList.contains('xr-shell--capture'))).toBe(true);
+    await appWindow.keyboard.press('Escape');
+    await expect.poll(async () => appWindow.evaluate(() => document.querySelector('.xr-shell')?.classList.contains('xr-shell--capture'))).toBe(false);
+    await expectNoErrors(appWindow, 'capture view only escape exit');
+
     await clickButton(appWindow, 'Capture 1280x720');
     await expectNoErrors(appWindow, 'capture viewport size');
     await expect.poll(async () => {
@@ -104,6 +159,20 @@ test('background debug mode loads and exercises core controls without showing th
       const box = await appWindow.getByTestId('legacy-viewport').boundingBox();
       return box ? Math.floor(box.height) : 0;
     }).toBeGreaterThanOrEqual(720);
+
+    await appWindow.keyboard.press('Escape');
+    await expect.poll(async () => appWindow.evaluate(() => document.querySelector('.xr-shell')?.classList.contains('xr-shell--capture'))).toBe(false);
+
+    await clickButton(appWindow, 'Capture 1920x1080');
+    await expectNoErrors(appWindow, 'capture 1920x1080');
+    await expect.poll(async () => {
+      const box = await appWindow.getByTestId('legacy-viewport').boundingBox();
+      return box ? Math.floor(box.width) : 0;
+    }).toBeGreaterThanOrEqual(1920);
+    const capture1920 = await appWindow.getByTestId('legacy-viewport').boundingBox();
+    if (Math.floor(capture1920.height) < 1080) {
+      await expect.poll(async () => (await appState(appWindow)).warnEntries.join('\n')).toContain('Capture size limited');
+    }
 
     expect(browserErrors, `pageerror events: ${browserErrors.join('\n')}`).toEqual([]);
     expect(consoleErrors, `console errors/warnings: ${consoleErrors.join('\n')}`).toEqual([]);

@@ -219,6 +219,14 @@ function App() {
     });
   }, []);
 
+  useEffect(() => {
+    function exitCaptureMode(event) {
+      if (event.key === 'Escape') setCaptureMode(false);
+    }
+    window.addEventListener('keydown', exitCaptureMode);
+    return () => window.removeEventListener('keydown', exitCaptureMode);
+  }, []);
+
   async function run(key, action) {
     setBusy(key);
     setError('');
@@ -312,7 +320,14 @@ function App() {
     setCaptureMode(true);
     await run('window', async () => {
       await new Promise((resolve) => requestAnimationFrame(() => resolve()));
-      return bridge().setWindowSize({ width, height, contentSize: true });
+      const result = await bridge().setWindowSize({ width, height, contentSize: true, center: false });
+      if (result?.limited) {
+        addLog('window', `Capture size limited: ${result.contentSize.width}x${result.contentSize.height}`, {
+          level: 'warn',
+          detail: result,
+        });
+      }
+      return result;
     });
   }
 

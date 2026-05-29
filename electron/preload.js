@@ -5,13 +5,22 @@ try {
   if (!electron.remote) {
     electron.remote = require('@electron/remote');
   }
-  if (window.top !== window && electron.remote?.getCurrentWindow) {
+  if (electron.remote?.getCurrentWindow) {
     const getCurrentWindow = electron.remote.getCurrentWindow.bind(electron.remote);
     electron.remote.getCurrentWindow = () => {
       const currentWindow = getCurrentWindow();
       return new Proxy(currentWindow, {
         get(target, prop) {
-          if (['setIgnoreMouseEvents', 'setFocusable', 'setAlwaysOnTop'].includes(prop)) {
+          if ([
+            'setIgnoreMouseEvents',
+            'setFocusable',
+            'setAlwaysOnTop',
+            'setContentSize',
+            'setSize',
+            'setBounds',
+            'setPosition',
+            'center',
+          ].includes(prop)) {
             return () => {};
           }
           const value = target[prop];
@@ -19,7 +28,11 @@ try {
         },
       });
     };
-    window.__xrAnimatorLegacyWindowShim = true;
+    if (window.top === window) {
+      window.__xrAnimatorHostWindowShim = true;
+    } else {
+      window.__xrAnimatorLegacyWindowShim = true;
+    }
   }
 } catch (error) {
   console.warn('[preload] @electron/remote bridge failed:', error);

@@ -97,6 +97,10 @@ function applyAlwaysOnTop(enabled) {
   }
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function createAppWindow() {
   const settings = settingsStore.read();
   const bounds = settings.windowBounds || settings.avatarWindowBounds || {};
@@ -185,19 +189,40 @@ function installIpc() {
     return { alwaysOnTop };
   });
 
-  ipcMain.handle('xr-animator:window:set-size', (_event, payload = {}) => {
+  ipcMain.handle('xr-animator:window:set-size', async (_event, payload = {}) => {
     if (!appWindow || appWindow.isDestroyed()) return { ok: false };
     const width = Math.max(960, Number(payload.width) || 1440);
     const height = Math.max(640, Number(payload.height) || 900);
+
+    const applySize = () => {
+      if (!payload.contentSize) {
+        appWindow.setSize(width, height, false);
+        return;
+      }
+      const [windowWidth, windowHeight] = appWindow.getSize();
+      const [contentWidth, contentHeight] = appWindow.getContentSize();
+      const frameWidth = Math.max(0, windowWidth - contentWidth);
+      const frameHeight = Math.max(0, windowHeight - contentHeight);
+      appWindow.setSize(width + frameWidth, height + frameHeight, false);
+    };
+
+    applySize();
     if (payload.contentSize) {
-      appWindow.setContentSize(width, height, true);
-    } else {
-      appWindow.setSize(width, height, true);
+      await delay(800);
+      const [contentWidth, contentHeight] = appWindow.getContentSize();
+      if (contentWidth !== width || contentHeight !== height) applySize();
     }
     if (payload.center !== false) appWindow.center();
     const bounds = appWindow.getBounds();
+    const [contentWidth, contentHeight] = appWindow.getContentSize();
     settingsStore.update({ windowBounds: bounds, avatarWindowBounds: bounds });
-    return { ok: true, bounds };
+    return {
+      ok: true,
+      bounds,
+      contentSize: { width: contentWidth, height: contentHeight },
+      requestedContentSize: payload.contentSize ? { width, height } : null,
+      limited: Boolean(payload.contentSize && (contentWidth !== width || contentHeight !== height)),
+    };
   });
 
   ipcMain.handle('xr-animator:window:center', () => {
