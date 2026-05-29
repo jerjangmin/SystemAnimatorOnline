@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const { fileURLToPath } = require('url');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
 const remoteMain = require('@electron/remote/main');
 const { createSettingsStore } = require('./settings-store');
@@ -7,23 +8,28 @@ const { createSettingsStore } = require('./settings-store');
 remoteMain.initialize();
 
 const APP_ROOT = path.resolve(__dirname, '..');
-const AVATAR_PRELOAD = path.join(__dirname, 'preload.js');
-const CONTROL_PRELOAD = path.join(__dirname, 'control-preload.js');
+const APP_PRELOAD = path.join(__dirname, 'preload.js');
 const settingsStore = createSettingsStore(app);
 const isTestMode = process.env.SOMILAND_TEST_MODE === '1' || process.argv.includes('--test-mode');
 
-let avatarWindow = null;
-let controlWindow = null;
-let avatarStatus = {
-  engineReady: false,
-  modelLoaded: false,
-  trackingMode: '',
-  backgroundMode: 'transparent',
-  message: '아바타 엔진 시작 전입니다.',
-  level: 'loading',
-};
-let commandSeq = 0;
-const pendingAvatarCommands = new Map();
+let appWindow = null;
+
+function isAllowedNavigation(targetUrl) {
+  if (!targetUrl || targetUrl === 'about:blank') return true;
+  let parsed;
+  try {
+    parsed = new URL(targetUrl);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'file:') return false;
+  try {
+    const filePath = path.resolve(fileURLToPath(parsed));
+    return filePath === APP_ROOT || filePath.startsWith(`${APP_ROOT}${path.sep}`);
+  } catch {
+    return false;
+  }
+}
 
 function toLocalPath(value) {
   return decodeURIComponent(
@@ -42,8 +48,8 @@ function installLegacyGlobals() {
   global.electron_as_wallpaper = () => false;
   global.update_tray = () => {};
   global.DropArea_drop = (dropPath) => {
-    if (avatarWindow && !avatarWindow.isDestroyed()) {
-      avatarWindow.webContents.send('DragDrop', dropPath);
+    if (appWindow && !appWindow.isDestroyed()) {
+      appWindow.webContents.send('xr-animator:legacy-drop', dropPath);
     }
   };
   global.GetImageSize = (filename) => {
@@ -83,221 +89,124 @@ function installLegacyGlobals() {
   })();
 }
 
-function createAvatarWindow() {
-  const settings = settingsStore.read();
-  const bounds = settings.avatarWindowBounds || settings.windowBounds || {};
+function applyAlwaysOnTop(enabled) {
+  if (appWindow && !appWindow.isDestroyed()) {
+    appWindow.setAlwaysOnTop(Boolean(enabled));
+  }
+}
 
-  avatarWindow = new BrowserWindow({
-    width: bounds.width || 1280,
-    height: bounds.height || 720,
+function createAppWindow() {
+  const settings = settingsStore.read();
+  const bounds = settings.windowBounds || settings.avatarWindowBounds || {};
+
+  appWindow = new BrowserWindow({
+    width: bounds.width || 1440,
+    height: bounds.height || 900,
     x: bounds.x,
     y: bounds.y,
-    minWidth: 640,
-    minHeight: 360,
-    frame: false,
+    minWidth: 960,
+    minHeight: 640,
+    frame: true,
     transparent: true,
     backgroundColor: '#00000000',
     resizable: true,
     show: false,
-    title: 'Somiland VTuber Avatar',
+    title: 'XR Animator',
     icon: path.join(APP_ROOT, 'icon_SA_512x512.png'),
     alwaysOnTop: Boolean(settings.alwaysOnTop),
     webPreferences: {
       nodeIntegration: true,
+      nodeIntegrationInSubFrames: true,
       contextIsolation: false,
       enableRemoteModule: true,
       backgroundThrottling: false,
-      preload: AVATAR_PRELOAD,
+      preload: APP_PRELOAD,
     },
   });
 
-  remoteMain.enable(avatarWindow.webContents);
+  remoteMain.enable(appWindow.webContents);
 
-  avatarWindow.once('ready-to-show', () => avatarWindow.show());
-  avatarWindow.on('close', () => {
-    if (!avatarWindow) return;
-    settingsStore.update({ avatarWindowBounds: avatarWindow.getBounds(), windowBounds: avatarWindow.getBounds() });
+  appWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  appWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    if (!isAllowedNavigation(targetUrl)) event.preventDefault();
   });
-  avatarWindow.on('closed', () => {
-    avatarWindow = null;
-  });
-
-  const avatarFile = isTestMode
-    ? path.join(APP_ROOT, 'tests', 'e2e', 'avatar-mock.html')
-    : path.join(APP_ROOT, 'somiland-avatar.html');
-  avatarWindow.loadFile(avatarFile);
-}
-
-function createControlWindow() {
-  const settings = settingsStore.read();
-  const bounds = settings.controlWindowBounds || {};
-
-  controlWindow = new BrowserWindow({
-    width: bounds.width || 460,
-    height: bounds.height || 760,
-    x: bounds.x,
-    y: bounds.y,
-    minWidth: 380,
-    minHeight: 560,
-    frame: true,
-    transparent: false,
-    backgroundColor: '#f8fafc',
-    resizable: true,
-    show: false,
-    title: 'Somiland VTuber Control',
-    icon: path.join(APP_ROOT, 'icon_SA_512x512.png'),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      backgroundThrottling: false,
-      preload: CONTROL_PRELOAD,
-    },
+  appWindow.webContents.on('will-frame-navigate', (event, ...args) => {
+    const targetUrl = args.find((value) => typeof value === 'string');
+    if (!isAllowedNavigation(targetUrl)) event.preventDefault();
   });
 
-  controlWindow.once('ready-to-show', () => controlWindow.show());
-  controlWindow.on('close', () => {
-    if (!controlWindow) return;
-    settingsStore.update({ controlWindowBounds: controlWindow.getBounds() });
+  appWindow.once('ready-to-show', () => appWindow.show());
+  appWindow.on('close', () => {
+    if (!appWindow) return;
+    const nextBounds = appWindow.getBounds();
+    settingsStore.update({
+      windowBounds: nextBounds,
+      avatarWindowBounds: nextBounds,
+    });
   });
-  controlWindow.on('closed', () => {
-    controlWindow = null;
+  appWindow.on('closed', () => {
+    appWindow = null;
   });
 
-  const controlUrl = process.env.SOMILAND_CONTROL_URL;
-  if (controlUrl) {
-    controlWindow.loadURL(controlUrl);
-  } else {
-    controlWindow.loadFile(path.join(APP_ROOT, 'ui-dist', 'index.html'));
-  }
-}
-
-function broadcastStatus() {
-  if (controlWindow && !controlWindow.isDestroyed()) {
-    controlWindow.webContents.send('somiland:status', avatarStatus);
-  }
-}
-
-function sendAvatarCommand(command, payload = {}, options = {}) {
-  if (!avatarWindow || avatarWindow.isDestroyed()) {
-    return Promise.reject(new Error('아바타 창이 준비되지 않았습니다.'));
-  }
-
-  const id = ++commandSeq;
-  const timeoutMs = options.timeoutMs || 45000;
-  const request = { id, command, payload };
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingAvatarCommands.delete(id);
-      reject(new Error(`아바타 명령 시간이 초과되었습니다: ${command}`));
-    }, timeoutMs);
-
-    pendingAvatarCommands.set(id, { resolve, reject, timer });
-    avatarWindow.webContents.send('somiland:avatar-command', request);
-  });
-}
-
-function applyAlwaysOnTop(enabled) {
-  if (avatarWindow && !avatarWindow.isDestroyed()) {
-    avatarWindow.setAlwaysOnTop(Boolean(enabled));
-  }
-}
-
-async function handleCommand(command, payload = {}) {
-  switch (command) {
-    case 'selectAndLoadVrm': {
-      const result = await dialog.showOpenDialog(controlWindow || avatarWindow, {
-        title: 'VRM 모델 선택',
-        properties: ['openFile'],
-        filters: [{ name: 'VRM model', extensions: ['vrm'] }],
-      });
-      if (result.canceled || !result.filePaths.length) return { canceled: true };
-      const filePath = result.filePaths[0];
-      const value = await sendAvatarCommand('loadVrm', { filePath }, { timeoutMs: 90000 });
-      settingsStore.update({ lastVrmPath: filePath });
-      return { ...value, filePath };
-    }
-    case 'loadLastVrm': {
-      const settings = settingsStore.read();
-      if (!settings.lastVrmPath) return { skipped: true, message: '저장된 VRM이 없습니다.' };
-      return sendAvatarCommand('loadVrm', { filePath: settings.lastVrmPath }, { timeoutMs: 90000 });
-    }
-    case 'setCamera': {
-      const patch = {
-        cameraDeviceId: payload.cameraDeviceId || '',
-        cameraLabel: payload.cameraLabel || '',
-      };
-      settingsStore.update(patch);
-      return sendAvatarCommand('setCamera', patch);
-    }
-    case 'startTracking': {
-      const trackingMode = payload.mode || 'Face+Body';
-      const value = await sendAvatarCommand('startTracking', { mode: trackingMode }, { timeoutMs: 90000 });
-      settingsStore.update({ trackingMode });
-      return value;
-    }
-    case 'setBackground': {
-      const backgroundMode = payload.mode || 'transparent';
-      const value = await sendAvatarCommand('setBackground', { mode: backgroundMode });
-      settingsStore.update({ backgroundMode, transparentBackground: backgroundMode === 'transparent' });
-      return value;
-    }
-    case 'setAlwaysOnTop': {
-      const alwaysOnTop = Boolean(payload.enabled);
-      settingsStore.update({ alwaysOnTop });
-      applyAlwaysOnTop(alwaysOnTop);
-      return { alwaysOnTop };
-    }
-    case 'setAvatarSize': {
-      if (!avatarWindow || avatarWindow.isDestroyed()) return { ok: false };
-      const width = Math.max(640, Number(payload.width) || 1280);
-      const height = Math.max(360, Number(payload.height) || 720);
-      avatarWindow.setSize(width, height, true);
-      if (payload.center !== false) avatarWindow.center();
-      settingsStore.update({ avatarWindowBounds: avatarWindow.getBounds(), windowBounds: avatarWindow.getBounds() });
-      return { ok: true, bounds: avatarWindow.getBounds() };
-    }
-    case 'centerAvatar': {
-      if (!avatarWindow || avatarWindow.isDestroyed()) return { ok: false };
-      avatarWindow.center();
-      settingsStore.update({ avatarWindowBounds: avatarWindow.getBounds(), windowBounds: avatarWindow.getBounds() });
-      return { ok: true, bounds: avatarWindow.getBounds() };
-    }
-    case 'setIgnoreMouseEvents': {
-      if (!avatarWindow || avatarWindow.isDestroyed()) return { ok: false };
-      avatarWindow.setIgnoreMouseEvents(Boolean(payload.ignore), { forward: true });
-      return { ok: true, ignore: Boolean(payload.ignore) };
-    }
-    case 'setExpressionPreset':
-      return sendAvatarCommand('setExpressionPreset', { preset: payload.preset || 'neutral' });
-    case 'resetPose':
-      return sendAvatarCommand('resetPose', {});
-    case 'showAvatar':
-      if (avatarWindow && !avatarWindow.isDestroyed()) avatarWindow.show();
-      return { ok: true };
-    default:
-      throw new Error(`알 수 없는 명령입니다: ${command}`);
-  }
+  appWindow.loadFile(path.join(APP_ROOT, 'ui-dist', 'index.html'));
 }
 
 function installIpc() {
-  ipcMain.handle('somiland:settings:get', () => settingsStore.read());
-  ipcMain.handle('somiland:settings:update', (_event, patch) => settingsStore.update(patch || {}));
-  ipcMain.handle('somiland:status:get', () => avatarStatus);
-  ipcMain.handle('somiland:command', (_event, command, payload) => handleCommand(command, payload || {}));
+  ipcMain.handle('xr-animator:env', () => ({
+    appRoot: APP_ROOT,
+    isTestMode,
+    legacyEntry: isTestMode ? '../tests/e2e/avatar-mock.html' : '../XR_Animator.html',
+  }));
 
-  ipcMain.on('somiland:avatar-status', (_event, nextStatus) => {
-    avatarStatus = { ...avatarStatus, ...(nextStatus || {}) };
-    broadcastStatus();
+  ipcMain.handle('xr-animator:settings:get', () => settingsStore.read());
+  ipcMain.handle('xr-animator:settings:update', (_event, patch) => settingsStore.update(patch || {}));
+
+  ipcMain.handle('xr-animator:dialog:select-vrm', async () => {
+    const result = await dialog.showOpenDialog(appWindow, {
+      title: 'VRM 모델 선택',
+      properties: ['openFile'],
+      filters: [{ name: 'VRM model', extensions: ['vrm'] }],
+    });
+    if (result.canceled || !result.filePaths.length) return { canceled: true };
+    const filePath = result.filePaths[0];
+    settingsStore.update({ lastVrmPath: filePath });
+    return { canceled: false, filePath };
   });
 
-  ipcMain.on('somiland:avatar-command-result', (_event, result) => {
-    const pending = pendingAvatarCommands.get(result.id);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    pendingAvatarCommands.delete(result.id);
-    if (result.ok) pending.resolve(result.value || {});
-    else pending.reject(new Error(result.error || '아바타 명령이 실패했습니다.'));
+  ipcMain.handle('xr-animator:window:set-always-on-top', (_event, enabled) => {
+    const alwaysOnTop = Boolean(enabled);
+    settingsStore.update({ alwaysOnTop });
+    applyAlwaysOnTop(alwaysOnTop);
+    return { alwaysOnTop };
+  });
+
+  ipcMain.handle('xr-animator:window:set-size', (_event, payload = {}) => {
+    if (!appWindow || appWindow.isDestroyed()) return { ok: false };
+    const width = Math.max(960, Number(payload.width) || 1440);
+    const height = Math.max(640, Number(payload.height) || 900);
+    if (payload.contentSize) {
+      appWindow.setContentSize(width, height, true);
+    } else {
+      appWindow.setSize(width, height, true);
+    }
+    if (payload.center !== false) appWindow.center();
+    const bounds = appWindow.getBounds();
+    settingsStore.update({ windowBounds: bounds, avatarWindowBounds: bounds });
+    return { ok: true, bounds };
+  });
+
+  ipcMain.handle('xr-animator:window:center', () => {
+    if (!appWindow || appWindow.isDestroyed()) return { ok: false };
+    appWindow.center();
+    const bounds = appWindow.getBounds();
+    settingsStore.update({ windowBounds: bounds, avatarWindowBounds: bounds });
+    return { ok: true, bounds };
+  });
+
+  ipcMain.handle('xr-animator:window:set-ignore-mouse-events', (_event, ignore) => {
+    if (!appWindow || appWindow.isDestroyed()) return { ok: false };
+    appWindow.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
+    return { ok: true, ignore: Boolean(ignore) };
   });
 }
 
@@ -309,13 +218,10 @@ app.commandLine.appendSwitch('force_high_performance_gpu');
 app.whenReady().then(() => {
   installLegacyGlobals();
   installIpc();
-  createAvatarWindow();
-  createControlWindow();
-  applyAlwaysOnTop(settingsStore.read().alwaysOnTop);
+  createAppWindow();
 
   app.on('activate', () => {
-    if (!avatarWindow) createAvatarWindow();
-    if (!controlWindow) createControlWindow();
+    if (!appWindow) createAppWindow();
   });
 });
 

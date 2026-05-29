@@ -11,7 +11,6 @@ const DEFAULT_SETTINGS = Object.freeze({
   obsMode: true,
   alwaysOnTop: true,
   avatarWindowBounds: { width: 1280, height: 720 },
-  controlWindowBounds: { width: 460, height: 760 },
   windowBounds: { width: 1280, height: 720 },
 });
 
@@ -26,10 +25,6 @@ function normalizeSettings(value = {}) {
     avatarWindowBounds: {
       ...DEFAULT_SETTINGS.avatarWindowBounds,
       ...(value.avatarWindowBounds || value.windowBounds || {}),
-    },
-    controlWindowBounds: {
-      ...DEFAULT_SETTINGS.controlWindowBounds,
-      ...(value.controlWindowBounds || {}),
     },
     windowBounds: {
       ...DEFAULT_SETTINGS.windowBounds,

@@ -1,25 +1,26 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createLegacyRuntime } from './legacy-runtime/legacyRuntime';
 import './styles.css';
 
 const TRACKING_MODES = [
-  { value: 'Face', label: '얼굴', description: '표정과 머리 움직임 중심' },
-  { value: 'Face+Body', label: '얼굴+상반신', description: '방송 기본 추천' },
-  { value: 'Body+Hands', label: '상반신+손', description: '손 제스처 포함' },
+  { value: 'Face', label: 'Face' },
+  { value: 'Face+Body', label: 'Face + Body' },
+  { value: 'Body+Hands', label: 'Body + Hands' },
 ];
 
 const BACKGROUNDS = [
-  { value: 'transparent', label: '투명' },
-  { value: 'green', label: '크로마 그린' },
-  { value: 'black', label: '검정' },
+  { value: 'transparent', label: 'Transparent' },
+  { value: 'green', label: 'Green' },
+  { value: 'black', label: 'Black' },
 ];
 
 const EXPRESSIONS = [
-  { value: 'neutral', label: '기본' },
-  { value: 'happy', label: '웃음' },
-  { value: 'surprised', label: '놀람' },
-  { value: 'angry', label: '화남' },
-  { value: 'sad', label: '슬픔' },
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'happy', label: 'Happy' },
+  { value: 'surprised', label: 'Surprised' },
+  { value: 'angry', label: 'Angry' },
+  { value: 'sad', label: 'Sad' },
 ];
 
 const DEFAULT_SETTINGS = {
@@ -31,72 +32,129 @@ const DEFAULT_SETTINGS = {
   alwaysOnTop: true,
 };
 
+const DEFAULT_RUNTIME = {
+  frameLoaded: false,
+  engineReady: false,
+  rendererReady: false,
+  hasStreamerMode: false,
+  hasAvatar: false,
+  modelLoaded: false,
+  currentModel: '',
+  trackingMode: '',
+  backgroundMode: 'transparent',
+  expressionPreset: 'neutral',
+};
+
 function bridge() {
-  return window.somilandControl;
+  return window.xrAnimatorElectron;
 }
 
 function basename(filePath) {
   return (filePath || '').split(/[\\/]/).pop() || '';
 }
 
-function StatusBadge({ level, children }) {
-  return <span className={`status-badge status-badge--${level || 'loading'}`}>{children}</span>;
+function statusText(runtime) {
+  if (!runtime.frameLoaded) return 'Legacy frame loading';
+  if (!runtime.engineReady) return 'Waiting for XR engine';
+  if (!runtime.rendererReady) return 'Engine ready';
+  return 'Renderer ready';
 }
 
-function Section({ title, description, children, error }) {
+function PanelSection({ title, children }) {
   return (
-    <section className="card" aria-labelledby={`${title}-title`}>
-      <div className="card__header">
-        <h2 id={`${title}-title`}>{title}</h2>
-        {description ? <p>{description}</p> : null}
-      </div>
-      <div className="card__body">{children}</div>
-      {error ? <p className="field-error" role="alert">{error}</p> : null}
+    <section className="debug-section" aria-label={title}>
+      <h2>{title}</h2>
+      {children}
     </section>
   );
 }
 
 function App() {
+  const frameRef = useRef(null);
+  const runtimeRef = useRef(null);
+  const [env, setEnv] = useState({ legacyEntry: '', isTestMode: false });
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const [status, setStatus] = useState({ level: 'loading', message: '컨트롤러 시작 중…' });
+  const [runtime, setRuntime] = useState(DEFAULT_RUNTIME);
+  const [logs, setLogs] = useState([]);
   const [busy, setBusy] = useState('');
-  const [errors, setErrors] = useState({});
   const [cameras, setCameras] = useState([]);
+  const [error, setError] = useState('');
+  const [captureMode, setCaptureMode] = useState(false);
 
-  const currentModel = useMemo(() => basename(settings.lastVrmPath), [settings.lastVrmPath]);
+  const legacySrc = env.legacyEntry;
   const isBusy = Boolean(busy);
+  const currentModel = useMemo(
+    () => runtime.currentModel || basename(settings.lastVrmPath) || 'None',
+    [runtime.currentModel, settings.lastVrmPath]
+  );
 
-  async function refreshAll() {
+  function addLog(scope, message) {
+    const text = message instanceof Error ? message.message : String(message);
+    setLogs((prev) => [
+      { id: `${Date.now()}-${Math.random()}`, time: new Date().toLocaleTimeString(), scope, message: text },
+      ...prev,
+    ].slice(0, 80));
+  }
+
+  function updateRuntime(patch) {
+    setRuntime((prev) => ({ ...prev, ...patch }));
+  }
+
+  async function refreshSettings() {
     if (!bridge()) {
-      setStatus({ level: 'error', message: 'Electron 제어 브리지를 찾지 못했습니다.' });
+      setError('Electron preload bridge not found.');
       return;
     }
-    const [nextSettings, nextStatus] = await Promise.all([
-      bridge().getSettings(),
-      bridge().getStatus(),
-    ]);
+    const nextSettings = await bridge().getSettings();
     setSettings({ ...DEFAULT_SETTINGS, ...nextSettings });
-    setStatus(nextStatus || { level: 'loading', message: '상태 대기 중…' });
   }
 
   useEffect(() => {
-    refreshAll().catch((error) => setStatus({ level: 'error', message: error.message }));
-    const unsubscribe = bridge()?.onStatus((nextStatus) => setStatus(nextStatus));
-    return () => unsubscribe?.();
+    if (!bridge()) {
+      setError('Electron preload bridge not found.');
+      return undefined;
+    }
+
+    let cleanupDrop = () => {};
+    Promise.all([bridge().getEnv(), bridge().getSettings()])
+      .then(([nextEnv, nextSettings]) => {
+        setEnv(nextEnv || {});
+        setSettings({ ...DEFAULT_SETTINGS, ...nextSettings });
+        addLog('app', nextEnv?.isTestMode ? 'Test mode enabled.' : 'Electron app initialized.');
+      })
+      .catch((nextError) => {
+        setError(nextError.message);
+        addLog('error', nextError);
+      });
+
+    cleanupDrop = bridge().onLegacyDrop?.((filePath) => {
+      runtimeRef.current?.loadVrm(filePath).catch((nextError) => {
+        setError(nextError.message);
+        addLog('error', nextError);
+      });
+    }) || cleanupDrop;
+
+    return () => cleanupDrop();
   }, []);
 
-  async function run(key, action, successMessage) {
+  useEffect(() => {
+    runtimeRef.current = createLegacyRuntime({
+      frame: frameRef,
+      log: addLog,
+      setSnapshot: updateRuntime,
+    });
+  }, []);
+
+  async function run(key, action) {
     setBusy(key);
-    setErrors((prev) => ({ ...prev, [key]: '' }));
+    setError('');
     try {
       const result = await action();
-      const nextSettings = await bridge().getSettings();
-      setSettings({ ...DEFAULT_SETTINGS, ...nextSettings });
-      if (successMessage) setStatus({ level: 'ready', message: successMessage(result) });
+      await refreshSettings();
       return result;
-    } catch (error) {
-      setErrors((prev) => ({ ...prev, [key]: error.message }));
-      setStatus({ level: 'error', message: error.message });
+    } catch (nextError) {
+      setError(nextError.message);
+      addLog('error', nextError);
       return null;
     } finally {
       setBusy('');
@@ -104,26 +162,35 @@ function App() {
   }
 
   async function loadVrm() {
-    await run('model', () => bridge().command('selectAndLoadVrm'), (result) => (
-      result?.canceled ? 'VRM 선택을 취소했습니다.' : `모델 로드 요청 완료: ${basename(result?.filePath)}`
-    ));
+    await run('model', async () => {
+      const result = await bridge().selectVrmFile();
+      if (result?.canceled) {
+        addLog('model', 'VRM selection canceled.');
+        return result;
+      }
+      return runtimeRef.current.loadVrm(result.filePath);
+    });
   }
 
   async function loadLastVrm() {
-    await run('model', () => bridge().command('loadLastVrm'), () => '마지막 모델 로드 요청 완료');
+    await run('model', async () => {
+      if (!settings.lastVrmPath) throw new Error('No saved VRM path.');
+      return runtimeRef.current.loadVrm(settings.lastVrmPath);
+    });
   }
 
   async function refreshCameras() {
     await run('camera', async () => {
       if (!navigator.mediaDevices?.enumerateDevices) {
-        throw new Error('이 환경에서는 카메라 목록 API를 사용할 수 없습니다.');
+        throw new Error('MediaDevices API is unavailable.');
       }
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       stream.getTracks().forEach((track) => track.stop());
       const devices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'videoinput');
       setCameras(devices);
+      addLog('camera', `Found ${devices.length} camera(s).`);
       return devices;
-    }, (devices) => `카메라 ${devices.length}개를 찾았습니다.`);
+    });
   }
 
   async function chooseCamera(event) {
@@ -131,123 +198,180 @@ function App() {
     const selected = cameras.find((camera) => camera.deviceId === cameraDeviceId);
     const cameraLabel = cameraDeviceId ? (selected?.label || '') : '';
     setSettings((prev) => ({ ...prev, cameraDeviceId, cameraLabel }));
-    await run('camera', () => bridge().command('setCamera', { cameraDeviceId, cameraLabel }), () => (
-      cameraLabel ? `카메라 선택: ${cameraLabel}` : '기본 카메라를 사용합니다.'
-    ));
+    await run('camera', async () => {
+      await bridge().updateSettings({ cameraDeviceId, cameraLabel });
+      return runtimeRef.current.setCamera({ cameraLabel });
+    });
   }
 
   async function startTracking(mode) {
     setSettings((prev) => ({ ...prev, trackingMode: mode }));
-    await run('tracking', () => bridge().command('startTracking', { mode }), () => `트래킹 시작 요청: ${mode}`);
+    await run('tracking', async () => {
+      await bridge().updateSettings({ trackingMode: mode });
+      return runtimeRef.current.startTracking(mode);
+    });
   }
 
   async function setBackground(mode) {
     setSettings((prev) => ({ ...prev, backgroundMode: mode }));
-    await run('obs', () => bridge().command('setBackground', { mode }), () => `OBS 배경: ${mode}`);
+    await run('background', async () => {
+      await bridge().updateSettings({ backgroundMode: mode, transparentBackground: mode === 'transparent' });
+      return runtimeRef.current.setBackground(mode);
+    });
   }
 
   async function setExpression(preset) {
-    await run('expression', () => bridge().command('setExpressionPreset', { preset }), (result) => (
-      result?.unsupported ? '현재 모델은 이 표정 프리셋을 지원하지 않습니다.' : `표정 적용: ${preset}`
-    ));
+    await run('expression', async () => runtimeRef.current.setExpressionPreset(preset));
   }
 
   async function resetPose() {
-    await run('expression', () => bridge().command('resetPose'), () => '포즈/표정 리셋 요청 완료');
+    await run('expression', async () => runtimeRef.current.resetPose());
   }
 
-  async function toggleAlwaysOnTop(event) {
+  async function setAlwaysOnTop(event) {
     const enabled = event.target.checked;
     setSettings((prev) => ({ ...prev, alwaysOnTop: enabled }));
-    await run('window', () => bridge().command('setAlwaysOnTop', { enabled }), () => (
-      enabled ? '아바타 창을 항상 위에 고정했습니다.' : '항상 위 고정을 해제했습니다.'
-    ));
+    await run('window', async () => bridge().setAlwaysOnTop(enabled));
   }
 
-  async function setAvatarSize(width, height) {
-    await run('window', () => bridge().command('setAvatarSize', { width, height }), () => `아바타 창 크기: ${width}×${height}`);
+  async function setCaptureViewportSize(width, height) {
+    setCaptureMode(true);
+    await run('window', async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      return bridge().setWindowSize({ width, height, contentSize: true });
+    });
   }
 
-  async function centerAvatar() {
-    await run('window', () => bridge().command('centerAvatar'), () => '아바타 창을 화면 중앙으로 이동했습니다.');
+  async function centerWindow() {
+    await run('window', async () => bridge().centerWindow());
+  }
+
+  async function resetCamera() {
+    await run('viewport', async () => runtimeRef.current.resetCamera());
   }
 
   return (
-    <main className="app-shell">
-      <header className="app-header">
-        <div>
-          <p className="eyebrow">macOS 개인용 VTuber</p>
-          <h1>Somiland VTuber</h1>
+    <main className={`xr-shell${captureMode ? ' xr-shell--capture' : ''}`}>
+      <section className="viewport-pane" aria-label="XR Animator viewport">
+        <div className="viewport-toolbar">
+          <div>
+            <p className="eyebrow">Electron Single Window</p>
+            <h1>XR Animator</h1>
+          </div>
+          <div className="runtime-badges" aria-label="runtime status">
+            <span className={runtime.frameLoaded ? 'badge badge--ready' : 'badge'}>Frame</span>
+            <span className={runtime.engineReady ? 'badge badge--ready' : 'badge'}>Engine</span>
+            <span className={runtime.rendererReady ? 'badge badge--ready' : 'badge'}>Renderer</span>
+          </div>
         </div>
-        <StatusBadge level={status.level}>{status.engineReady ? '엔진 준비' : '준비 중'}</StatusBadge>
-      </header>
-
-      <section className="status-panel" aria-live="polite" aria-busy={isBusy}>
-        <p>{busy ? '처리 중… ' : ''}{status.message || '상태 대기 중…'}</p>
+        <div className="viewport-frame-wrap" data-testid="legacy-viewport" data-background-mode={settings.backgroundMode}>
+          {legacySrc ? (
+            <iframe
+              ref={frameRef}
+              title="XR Animator legacy runtime"
+              className="legacy-frame"
+              src={legacySrc}
+              onLoad={() => runtimeRef.current?.onFrameLoad()}
+            />
+          ) : (
+            <div className="viewport-loading">Loading XR Animator runtime...</div>
+          )}
+        </div>
       </section>
 
-      <Section title="모델" description="VRM 0.x/1.0 모델을 불러오고 마지막 세션을 복원합니다." error={errors.model}>
-        <div className="button-row">
-          <button type="button" className="button button--primary" onClick={loadVrm} disabled={isBusy}>VRM 불러오기</button>
-          <button type="button" className="button" onClick={loadLastVrm} disabled={isBusy || !settings.lastVrmPath}>마지막 모델</button>
-        </div>
-        <p className="meta">{currentModel ? `현재 저장된 모델: ${currentModel}` : '저장된 모델 없음'}</p>
-      </Section>
+      <aside className="debug-panel" aria-label="XR Animator debug controls">
+        <header className="debug-header">
+          <p className="eyebrow">Debug Console</p>
+          <h2>{statusText(runtime)}</h2>
+          {error ? <p className="error-text" role="alert">{error}</p> : null}
+        </header>
 
-      <Section title="카메라" description="권한을 허용한 뒤 방송에 사용할 입력 카메라를 선택합니다." error={errors.camera}>
-        <button type="button" className="button" onClick={refreshCameras} disabled={isBusy}>카메라 권한/목록 갱신</button>
-        <label className="field-label" htmlFor="camera-select">입력 카메라</label>
-        <select id="camera-select" className="select" value={settings.cameraDeviceId || ''} onChange={chooseCamera} disabled={isBusy}>
-          <option value="">기본 카메라</option>
-          {cameras.map((camera, index) => (
-            <option key={camera.deviceId || index} value={camera.deviceId}>{camera.label || `카메라 ${index + 1}`}</option>
-          ))}
-        </select>
-      </Section>
+        <PanelSection title="Runtime">
+          <dl className="kv-grid">
+            <div><dt>Mode</dt><dd>{env.isTestMode ? 'Test' : 'App'}</dd></div>
+            <div><dt>Model</dt><dd>{currentModel}</dd></div>
+            <div><dt>Tracking</dt><dd>{runtime.trackingMode || settings.trackingMode || 'Idle'}</dd></div>
+            <div><dt>Background</dt><dd>{runtime.backgroundMode || settings.backgroundMode}</dd></div>
+          </dl>
+        </PanelSection>
 
-      <Section title="트래킹" description="방송 중 자주 쓰는 추적 범위만 간단하게 노출합니다." error={errors.tracking}>
-        <div className="choice-grid" role="group" aria-label="트래킹 모드">
-          {TRACKING_MODES.map((mode) => (
-            <button key={mode.value} type="button" className="choice" aria-pressed={settings.trackingMode === mode.value} onClick={() => startTracking(mode.value)} disabled={isBusy}>
-              <strong>{mode.label}</strong>
-              <span>{mode.description}</span>
-            </button>
-          ))}
-        </div>
-      </Section>
+        <PanelSection title="Model">
+          <div className="button-row">
+            <button type="button" className="button button--primary" onClick={loadVrm} disabled={isBusy}>Load VRM</button>
+            <button type="button" className="button" onClick={loadLastVrm} disabled={isBusy || !settings.lastVrmPath}>Load Last</button>
+          </div>
+        </PanelSection>
 
-      <Section title="표정과 포즈" description="모델 호환성이 높은 안전 프리셋만 제공합니다." error={errors.expression}>
-        <div className="button-row button-row--wrap" role="group" aria-label="표정 프리셋">
-          {EXPRESSIONS.map((expression) => (
-            <button key={expression.value} type="button" className="button" onClick={() => setExpression(expression.value)} disabled={isBusy}>{expression.label}</button>
-          ))}
-          <button type="button" className="button" onClick={resetPose} disabled={isBusy}>리셋</button>
-        </div>
-      </Section>
+        <PanelSection title="Camera">
+          <button type="button" className="button" onClick={refreshCameras} disabled={isBusy}>Refresh Cameras</button>
+          <select className="select" value={settings.cameraDeviceId || ''} onChange={chooseCamera} disabled={isBusy}>
+            <option value="">Default camera</option>
+            {cameras.map((camera, index) => (
+              <option key={camera.deviceId || index} value={camera.deviceId}>{camera.label || `Camera ${index + 1}`}</option>
+            ))}
+          </select>
+        </PanelSection>
 
-      <Section title="OBS" description="아바타 창만 캡처하세요. 컨트롤 창은 OBS에 잡히지 않습니다." error={errors.obs}>
-        <div className="segmented" role="group" aria-label="OBS 배경">
-          {BACKGROUNDS.map((background) => (
-            <button key={background.value} type="button" aria-pressed={settings.backgroundMode === background.value} onClick={() => setBackground(background.value)} disabled={isBusy}>{background.label}</button>
-          ))}
-        </div>
-      </Section>
+        <PanelSection title="Tracking">
+          <div className="segmented" role="group" aria-label="tracking mode">
+            {TRACKING_MODES.map((mode) => (
+              <button key={mode.value} type="button" aria-pressed={settings.trackingMode === mode.value} onClick={() => startTracking(mode.value)} disabled={isBusy}>
+                {mode.label}
+              </button>
+            ))}
+          </div>
+        </PanelSection>
 
-      <Section title="창" description="아바타 창은 OBS용, 이 창은 조작용입니다." error={errors.window}>
-        <label className="switch-row">
-          <input type="checkbox" checked={settings.alwaysOnTop !== false} onChange={toggleAlwaysOnTop} disabled={isBusy} />
-          <span>아바타 창 항상 위에 고정</span>
-        </label>
-        <div className="button-row button-row--wrap" role="group" aria-label="아바타 창 크기">
-          <button type="button" className="button" onClick={() => setAvatarSize(1280, 720)} disabled={isBusy}>HD 720p</button>
-          <button type="button" className="button" onClick={() => setAvatarSize(1920, 1080)} disabled={isBusy}>Full HD</button>
-          <button type="button" className="button" onClick={() => setAvatarSize(1080, 1920)} disabled={isBusy}>세로 9:16</button>
+        <PanelSection title="Expression">
+          <div className="button-grid" role="group" aria-label="expression presets">
+            {EXPRESSIONS.map((expression) => (
+              <button key={expression.value} type="button" className="button" onClick={() => setExpression(expression.value)} disabled={isBusy}>
+                {expression.label}
+              </button>
+            ))}
+            <button type="button" className="button" onClick={resetPose} disabled={isBusy}>Reset Pose</button>
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Background">
+          <div className="segmented" role="group" aria-label="background mode">
+            {BACKGROUNDS.map((background) => (
+              <button key={background.value} type="button" aria-pressed={settings.backgroundMode === background.value} onClick={() => setBackground(background.value)} disabled={isBusy}>
+                {background.label}
+              </button>
+            ))}
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Window">
+          <label className="switch-row">
+            <input type="checkbox" checked={settings.alwaysOnTop !== false} onChange={setAlwaysOnTop} disabled={isBusy} />
+            <span>Always on top</span>
+          </label>
+          <label className="switch-row">
+            <input type="checkbox" checked={captureMode} onChange={(event) => setCaptureMode(event.target.checked)} disabled={isBusy} />
+            <span>Capture view only</span>
+          </label>
+          <div className="button-grid">
+            <button type="button" className="button" onClick={() => setCaptureViewportSize(1280, 720)} disabled={isBusy}>Capture 1280x720</button>
+            <button type="button" className="button" onClick={() => setCaptureViewportSize(1920, 1080)} disabled={isBusy}>Capture 1920x1080</button>
+            <button type="button" className="button" onClick={centerWindow} disabled={isBusy}>Center</button>
+            <button type="button" className="button" onClick={resetCamera} disabled={isBusy}>Reset Camera</button>
+          </div>
+        </PanelSection>
+      </aside>
+
+      <section className="log-panel" aria-label="runtime log">
+        <div className="log-status">
+          <strong>{busy ? `Running: ${busy}` : 'Idle'}</strong>
+          <span>{logs.length} log entries</span>
         </div>
-        <div className="button-row">
-          <button type="button" className="button" onClick={centerAvatar} disabled={isBusy}>가운데 정렬</button>
-          <button type="button" className="button" onClick={() => bridge().command('showAvatar')} disabled={isBusy}>아바타 창 보이기</button>
+        <div className="log-list">
+          {logs.length ? logs.map((entry) => (
+            <p key={entry.id}><time>{entry.time}</time> <code>{entry.scope}</code> {entry.message}</p>
+          )) : <p>No logs yet.</p>}
         </div>
-      </Section>
+      </section>
     </main>
   );
 }
